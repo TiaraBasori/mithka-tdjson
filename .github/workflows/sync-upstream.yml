@@ -47,7 +47,7 @@ jobs:
       should_build: ${{ steps.metadata.outputs.should_build }}
     steps:
       - name: Check out Mithka TDLib packaging
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Resolve upstream commit
         id: resolve
@@ -65,7 +65,7 @@ jobs:
           echo "TDLib $UPSTREAM_REF -> $upstream_sha"
 
       - name: Check out TDLib metadata
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: tdlib/td
           ref: ${{ steps.resolve.outputs.upstream_sha }}
@@ -148,10 +148,10 @@ jobs:
     if: needs.prepare.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Check out resolved TDLib source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: tdlib/td
           ref: ${{ needs.prepare.outputs.upstream_sha }}
@@ -175,7 +175,7 @@ jobs:
       matrix:
         abi: [arm64-v8a, armeabi-v7a, x86_64]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install build tools
         run: |
@@ -189,7 +189,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       - name: Cache Android native build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/android-api23
           key: android-${{ matrix.abi }}-${{ needs.prepare.outputs.upstream_short_sha }}-${{ needs.prepare.outputs.patchset_sha }}-${{ needs.prepare.outputs.build_definition_sha }}
@@ -201,7 +201,7 @@ jobs:
         run: scripts/build-android-libs.sh ${{ matrix.abi }}
 
       - name: Upload Android asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tdjson-android-${{ matrix.abi }}
           path: dist/tdjson-android-${{ matrix.abi }}.zip
@@ -213,13 +213,13 @@ jobs:
     if: needs.prepare.outputs.should_build == 'true'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install build tools
         run: brew install cmake ninja
 
       - name: Cache iOS native build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/ios-min13.0
           key: ios-${{ needs.prepare.outputs.upstream_short_sha }}-${{ needs.prepare.outputs.patchset_sha }}-${{ needs.prepare.outputs.build_definition_sha }}
@@ -230,7 +230,7 @@ jobs:
         run: scripts/build-ios-xcframework.sh
 
       - name: Upload iOS asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tdjson-ios
           path: dist/tdjson-ios.xcframework.zip
@@ -264,7 +264,7 @@ jobs:
             library: tdjson.dll
             asset: tdjson-windows-x64.zip
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Linux build tools
         if: matrix.platform == 'linux'
@@ -289,7 +289,7 @@ jobs:
           $gperfTools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Cache desktop native build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/desktop-${{ matrix.platform }}
           key: desktop-${{ matrix.platform }}-${{ matrix.architecture }}-${{ needs.prepare.outputs.upstream_short_sha }}-${{ needs.prepare.outputs.patchset_sha }}-${{ needs.prepare.outputs.build_definition_sha }}
@@ -337,7 +337,7 @@ jobs:
         run: scripts/package-desktop-lib.sh "dist/${{ matrix.library }}" "${{ matrix.asset }}" dist
 
       - name: Upload desktop asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tdjson-${{ matrix.platform }}
           path: dist/${{ matrix.asset }}
@@ -351,10 +351,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Download tdjson assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
