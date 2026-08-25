@@ -32,7 +32,8 @@ prepare_td_source() {
     git -C "$TD_SOURCE" remote add origin "$TD_REPO"
   fi
   git -C "$TD_SOURCE" config core.autocrlf false
-  git -C "$TD_SOURCE" fetch --depth 1 origin "$TD_COMMIT"
+  # Keep history available for the patch helper's three-way fallback.
+  git -C "$TD_SOURCE" fetch origin "$TD_COMMIT"
   git -C "$TD_SOURCE" reset --hard FETCH_HEAD
   git -C "$TD_SOURCE" clean -fdx
   echo "==> TDLib $(git -C "$TD_SOURCE" rev-parse HEAD)"

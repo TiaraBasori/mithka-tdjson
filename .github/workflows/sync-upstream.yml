@@ -156,6 +156,9 @@ jobs:
           repository: tdlib/td
           ref: ${{ needs.prepare.outputs.upstream_sha }}
           path: upstream-td
+          # Keep patch base blobs available so git apply --3way can absorb
+          # non-overlapping upstream edits instead of failing on moved lines.
+          fetch-depth: 0
 
       - name: Apply current patch series
         run: |

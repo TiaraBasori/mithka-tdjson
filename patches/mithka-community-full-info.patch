@@ -1,62 +1,34 @@
 diff --git a/td/generate/scheme/td_api.tl b/td/generate/scheme/td_api.tl
+index 51c875ab1..7139b51b2 100644
 --- a/td/generate/scheme/td_api.tl
 +++ b/td/generate/scheme/td_api.tl
-@@ -2300,6 +2300,17 @@ communityMemberStatusBanned = CommunityMemberStatus;
- //@permissions Actions that non-administrator community members are allowed to take in the community
- community id:int53 have_access:Bool name:string photo:chatPhotoInfo date:int32 status:CommunityMemberStatus permissions:communityPermissions = Community;
- 
-+//@description Describes a chat linked to a community
+@@ -2320,0 +2321,11 @@ communityFullInfo photo:chatPhoto chats:vector<communityChat> administrator_coun
++//@description Describes a chat linked to a community for the Mithka synchronous community catalog
 +//@chat_id Chat identifier
 +//@can_view_history True, if the current user can view the chat history without joining the chat
 +//@has_visibility True, if the server provided an explicit visibility setting
 +//@is_visible The explicit visibility setting, if available
-+communityPeerInfo chat_id:int53 can_view_history:Bool has_visibility:Bool is_visible:Bool = CommunityPeerInfo;
++mithkaCommunityPeerInfo chat_id:int53 can_view_history:Bool has_visibility:Bool is_visible:Bool = MithkaCommunityPeerInfo;
 +
-+//@description Contains full information about the chats linked to a community
++//@description Contains the chats linked to a community for Mithka's synchronous community catalog
 +//@peers Chats linked to the community
-+communityFullInfo peers:vector<communityPeerInfo> = CommunityFullInfo;
++mithkaCommunityPeerCatalog peers:vector<mithkaCommunityPeerInfo> = MithkaCommunityPeerCatalog;
 +
- 
- //@description Contains description of user rating
- //@level The level of the user; may be negative
-@@ -11388,6 +11399,9 @@ getSupergroup supergroup_id:int53 = Supergroup;
- //@description Returns full information about a supergroup or a channel by its identifier, cached for up to 1 minute @supergroup_id Supergroup or channel identifier
- getSupergroupFullInfo supergroup_id:int53 = SupergroupFullInfo;
- 
+@@ -11523,0 +11535,3 @@ getSupergroupFullInfo supergroup_id:int53 = SupergroupFullInfo;
 +//@description Returns chats linked to a community @community_id Community identifier
-+getCommunityFullInfo community_id:int53 = CommunityFullInfo;
++getCommunityFullInfo community_id:int53 = MithkaCommunityPeerCatalog;
 +
- //@description Returns information about a secret chat by its identifier. This is an offline method @secret_chat_id Secret chat identifier
- getSecretChat secret_chat_id:int32 = SecretChat;
- 
 diff --git a/td/telegram/CommunityManager.cpp b/td/telegram/CommunityManager.cpp
+index 3681bd820..d4180a93f 100644
 --- a/td/telegram/CommunityManager.cpp
 +++ b/td/telegram/CommunityManager.cpp
-@@ -11,6 +11,7 @@
- #include "td/telegram/ChannelType.h"
- #include "td/telegram/ChatManager.h"
- #include "td/telegram/DialogId.h"
-+#include "td/telegram/DialogManager.h"
- #include "td/telegram/DialogPhoto.hpp"
- #include "td/telegram/Global.h"
- #include "td/telegram/logevent/LogEvent.h"
-@@ -18,6 +19,7 @@
- #include "td/telegram/PhotoSize.h"
- #include "td/telegram/Td.h"
- #include "td/telegram/TdDb.h"
-+#include "td/telegram/UserManager.h"
- 
- #include "td/db/binlog/BinlogEvent.h"
- #include "td/db/binlog/BinlogHelper.h"
-@@ -69,6 +71,55 @@ class GetCommunitiesQuery final : public Td::ResultHandler {
-   }
- };
- 
-+class GetCommunityFullInfoQuery final : public Td::ResultHandler {
-+  Promise<td_api::object_ptr<td_api::communityFullInfo>> promise_;
+@@ -119,0 +120,50 @@ class GetFullCommunityQuery final : public Td::ResultHandler {
++class GetMithkaCommunityPeerCatalogQuery final : public Td::ResultHandler {
++  Promise<td_api::object_ptr<td_api::mithkaCommunityPeerCatalog>> promise_;
 +
 + public:
-+  explicit GetCommunityFullInfoQuery(Promise<td_api::object_ptr<td_api::communityFullInfo>> &&promise)
++  explicit GetMithkaCommunityPeerCatalogQuery(
++      Promise<td_api::object_ptr<td_api::mithkaCommunityPeerCatalog>> &&promise)
 +      : promise_(std::move(promise)) {
 +  }
 +
@@ -72,14 +44,14 @@ diff --git a/td/telegram/CommunityManager.cpp b/td/telegram/CommunityManager.cpp
 +    }
 +
 +    auto result = result_ptr.move_as_ok();
-+    td_->user_manager_->on_get_users(std::move(result->users_), "GetCommunityFullInfoQuery");
-+    td_->chat_manager_->on_get_chats(std::move(result->chats_), "GetCommunityFullInfoQuery");
++    td_->user_manager_->on_get_users(std::move(result->users_), "GetMithkaCommunityPeerCatalogQuery");
++    td_->chat_manager_->on_get_chats(std::move(result->chats_), "GetMithkaCommunityPeerCatalogQuery");
 +    if (result->full_chat_->get_id() != telegram_api::communityFull::ID) {
 +      return promise_.set_error(500, "Unexpected community full info");
 +    }
 +
 +    auto community_full = move_tl_object_as<telegram_api::communityFull>(result->full_chat_);
-+    vector<td_api::object_ptr<td_api::communityPeerInfo>> peers;
++    vector<td_api::object_ptr<td_api::mithkaCommunityPeerInfo>> peers;
 +    peers.reserve(community_full->linked_peers_.size());
 +    for (auto &peer : community_full->linked_peers_) {
 +      auto dialog_id = DialogId(peer->peer_);
@@ -87,13 +59,13 @@ diff --git a/td/telegram/CommunityManager.cpp b/td/telegram/CommunityManager.cpp
 +        LOG(ERROR) << "Receive invalid community peer";
 +        continue;
 +      }
-+      td_->dialog_manager_->force_create_dialog(dialog_id, "GetCommunityFullInfoQuery", true);
++      td_->dialog_manager_->force_create_dialog(dialog_id, "GetMithkaCommunityPeerCatalogQuery", true);
 +      auto has_visibility = (peer->flags_ & 1) != 0;
-+      peers.push_back(td_api::make_object<td_api::communityPeerInfo>(
-+          td_->dialog_manager_->get_chat_id_object(dialog_id, "communityPeerInfo"), peer->can_view_history_,
++      peers.push_back(td_api::make_object<td_api::mithkaCommunityPeerInfo>(
++          td_->dialog_manager_->get_chat_id_object(dialog_id, "mithkaCommunityPeerInfo"), peer->can_view_history_,
 +          has_visibility, peer->visible_));
 +    }
-+    promise_.set_value(td_api::make_object<td_api::communityFullInfo>(std::move(peers)));
++    promise_.set_value(td_api::make_object<td_api::mithkaCommunityPeerCatalog>(std::move(peers)));
 +  }
 +
 +  void on_error(Status status) final {
@@ -101,15 +73,9 @@ diff --git a/td/telegram/CommunityManager.cpp b/td/telegram/CommunityManager.cpp
 +  }
 +};
 +
- template <class StorerT>
- void CommunityManager::Community::store(StorerT &storer) const {
-   using td::store;
-@@ -647,6 +698,18 @@ td_api::object_ptr<td_api::community> CommunityManager::get_community_object(Com
-   return get_community_object(community_id, get_community(community_id));
- }
- 
+@@ -1203,0 +1254,12 @@ td_api::object_ptr<td_api::community> CommunityManager::get_community_object(Com
 +void CommunityManager::get_community_full_info(
-+    CommunityId community_id, Promise<td_api::object_ptr<td_api::communityFullInfo>> &&promise) {
++    CommunityId community_id, Promise<td_api::object_ptr<td_api::mithkaCommunityPeerCatalog>> &&promise) {
 +  if (!have_accessible_community(community_id)) {
 +    return promise.set_error(400, "Community not found");
 +  }
@@ -117,50 +83,32 @@ diff --git a/td/telegram/CommunityManager.cpp b/td/telegram/CommunityManager.cpp
 +  if (input_community == nullptr) {
 +    return promise.set_error(400, "Community not found");
 +  }
-+  td_->create_handler<GetCommunityFullInfoQuery>(std::move(promise))->send(std::move(input_community));
++  td_->create_handler<GetMithkaCommunityPeerCatalogQuery>(std::move(promise))->send(std::move(input_community));
 +}
 +
- td_api::object_ptr<td_api::community> CommunityManager::get_community_object(CommunityId community_id,
-                                                                              const Community *c) const {
-   if (c == nullptr) {
 diff --git a/td/telegram/CommunityManager.h b/td/telegram/CommunityManager.h
+index 9ad2ed22c..0f11d211a 100644
 --- a/td/telegram/CommunityManager.h
 +++ b/td/telegram/CommunityManager.h
-@@ -51,6 +51,9 @@ class CommunityManager final : public Actor {
- 
-   td_api::object_ptr<td_api::community> get_community_object(CommunityId community_id) const;
- 
+@@ -74,0 +75,3 @@ class CommunityManager final : public Actor {
 +  void get_community_full_info(CommunityId community_id,
-+                               Promise<td_api::object_ptr<td_api::communityFullInfo>> &&promise);
++                               Promise<td_api::object_ptr<td_api::mithkaCommunityPeerCatalog>> &&promise);
 +
-   telegram_api::object_ptr<telegram_api::InputChannel> get_input_community(CommunityId community_id) const;
- 
-   void on_binlog_community_event(BinlogEvent &&event);
 diff --git a/td/telegram/Requests.cpp b/td/telegram/Requests.cpp
+index e38b7864a..8bdaa2b5c 100644
 --- a/td/telegram/Requests.cpp
 +++ b/td/telegram/Requests.cpp
-@@ -2611,6 +2611,12 @@ void Requests::on_request(uint64 id, const td_api::getSupergroupFullInfo &reques
-   CREATE_REQUEST(GetSupergroupFullInfoRequest, request.supergroup_id_);
- }
- 
+@@ -2617,0 +2618,6 @@ void Requests::on_request(uint64 id, const td_api::getSupergroupFullInfo &reques
 +void Requests::on_request(uint64 id, const td_api::getCommunityFullInfo &request) {
 +  CHECK_IS_USER();
 +  CREATE_REQUEST_PROMISE();
 +  td_->community_manager_->get_community_full_info(CommunityId(request.community_id_), std::move(promise));
 +}
 +
- void Requests::on_request(uint64 id, const td_api::getSecretChat &request) {
-   CREATE_REQUEST(GetSecretChatRequest, request.secret_chat_id_);
- }
 diff --git a/td/telegram/Requests.h b/td/telegram/Requests.h
+index 6038d69b0..85379bd34 100644
 --- a/td/telegram/Requests.h
 +++ b/td/telegram/Requests.h
-@@ -264,6 +264,8 @@ class Requests {
- 
-   void on_request(uint64 id, const td_api::getSupergroupFullInfo &request);
- 
+@@ -266,0 +267,2 @@ class Requests {
 +  void on_request(uint64 id, const td_api::getCommunityFullInfo &request);
 +
-   void on_request(uint64 id, const td_api::getSecretChat &request);
- 
-   void on_request(uint64 id, const td_api::getChat &request);
