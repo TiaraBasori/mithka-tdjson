@@ -1,15 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -ne 2 ]]; then
-  echo "usage: $0 <linux|macos|windows> OUTPUT_LIBRARY" >&2
+if [[ "$#" -lt 2 || "$#" -gt 3 ]]; then
+  echo "usage: $0 <linux|macos|windows> OUTPUT_LIBRARY [ARCHITECTURE]" >&2
   exit 2
 fi
 
 PLATFORM="$1"
 OUTPUT_LIBRARY="$2"
+ARCHITECTURE="${3:-}"
+# Linux and Windows build one architecture at a time and are compiled on a
+# runner of that architecture; macOS is always a fat arm64+x86_64 library.
 case "$PLATFORM" in
-  linux|macos|windows) ;;
+  linux|windows)
+    ARCHITECTURE="${ARCHITECTURE:-x64}"
+    case "$ARCHITECTURE" in
+      x64|arm64) ;;
+      *)
+        echo "error: unsupported $PLATFORM architecture: $ARCHITECTURE" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  macos)
+    ARCHITECTURE="${ARCHITECTURE:-universal}"
+    if [[ "$ARCHITECTURE" != universal ]]; then
+      echo "error: macOS tdjson is always universal, got: $ARCHITECTURE" >&2
+      exit 2
+    fi
+    ;;
   *)
     echo "error: unsupported desktop platform: $PLATFORM" >&2
     exit 2
@@ -19,7 +38,7 @@ esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TD_REPO="${TD_REPO:-https://github.com/tdlib/td.git}"
 TD_COMMIT="${TD_COMMIT:-master}"
-BUILD_ROOT="${BUILD_ROOT:-$ROOT/build/desktop-$PLATFORM}"
+BUILD_ROOT="${BUILD_ROOT:-$ROOT/build/desktop-$PLATFORM-$ARCHITECTURE}"
 TD_SOURCE="$BUILD_ROOT/td"
 TD_BUILD="$BUILD_ROOT/td-build"
 
@@ -90,6 +109,22 @@ build_macos_openssl() {
     -output "$openssl_universal/lib/libcrypto.a"
 }
 
+# The COFF machine field as hex (8664 = x64, aa64 = ARM64). It follows the
+# "PE\0\0" signature, whose offset the DOS header stores at 0x3c. Every runner
+# this builds on is little-endian, which is what lets od read the fields
+# directly as words.
+pe_machine_type() {
+  local library="$1"
+  local pe_offset signature
+  pe_offset="$(od -An -tu4 -j 60 -N 4 "$library" | tr -d '[:space:]')"
+  signature="$(od -An -tx1 -j "$pe_offset" -N 4 "$library" | tr -d '[:space:]')"
+  if [[ "$signature" != 50450000 ]]; then
+    echo "error: $library is not a PE image" >&2
+    return 1
+  fi
+  od -An -tx2 -j "$((pe_offset + 4))" -N 2 "$library" | tr -d '[:space:]'
+}
+
 verify_library() {
   local library="$1"
   local symbols
@@ -107,6 +142,19 @@ verify_library() {
       done
       if ldd "$library" | grep -q 'not found'; then
         ldd "$library" >&2
+        return 1
+      fi
+      local machine expected_machine
+      machine="$(
+        readelf -h "$library" \
+          | awk -F: '/^[[:space:]]*Machine:/ { sub(/^[[:space:]]+/, "", $2); print $2 }'
+      )"
+      case "$ARCHITECTURE" in
+        x64) expected_machine='Advanced Micro Devices X86-64' ;;
+        arm64) expected_machine='AArch64' ;;
+      esac
+      if [[ "$machine" != "$expected_machine" ]]; then
+        echo "error: expected an $expected_machine ELF, got: $machine" >&2
         return 1
       fi
       ;;
@@ -132,7 +180,18 @@ verify_library() {
       fi
       ;;
     windows)
-      # The workflow verifies exports by loading the DLL with GetProcAddress.
+      # The workflow verifies exports by loading the DLL with GetProcAddress;
+      # here only the PE machine type is cheap enough to confirm in bash.
+      local pe_machine expected_pe_machine
+      pe_machine="$(pe_machine_type "$library")"
+      case "$ARCHITECTURE" in
+        x64) expected_pe_machine=8664 ;;
+        arm64) expected_pe_machine=aa64 ;;
+      esac
+      if [[ "$pe_machine" != "$expected_pe_machine" ]]; then
+        echo "error: expected PE machine $expected_pe_machine, got: $pe_machine" >&2
+        return 1
+      fi
       ;;
   esac
 }
@@ -171,10 +230,14 @@ case "$PLATFORM" in
   windows)
     : "${VCPKG_INSTALLATION_ROOT:?VCPKG_INSTALLATION_ROOT is required on Windows}"
     vcpkg_toolchain="$(cygpath -m "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake")"
+    case "$ARCHITECTURE" in
+      x64) cmake_architecture=x64 ;;
+      arm64) cmake_architecture=ARM64 ;;
+    esac
     cmake -S "$TD_SOURCE" -B "$TD_BUILD" \
-      -G 'Visual Studio 17 2022' -A x64 \
+      -G 'Visual Studio 17 2022' -A "$cmake_architecture" \
       -DCMAKE_TOOLCHAIN_FILE="$vcpkg_toolchain" \
-      -DVCPKG_TARGET_TRIPLET=x64-windows-static \
+      -DVCPKG_TARGET_TRIPLET="$ARCHITECTURE-windows-static" \
       -DTD_ENABLE_LTO=OFF
     cmake --build "$TD_BUILD" --target tdjson --config Release \
       --parallel "${TD_BUILD_JOBS:-2}"
@@ -192,4 +255,4 @@ if [[ "$PLATFORM" == macos ]]; then
   install_name_tool -id '@rpath/libtdjson.dylib' "$OUTPUT_LIBRARY"
 fi
 verify_library "$OUTPUT_LIBRARY"
-echo "Built $PLATFORM tdjson: $OUTPUT_LIBRARY"
+echo "Built $PLATFORM $ARCHITECTURE tdjson: $OUTPUT_LIBRARY"

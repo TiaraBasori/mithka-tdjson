@@ -113,8 +113,10 @@ jobs:
               tdjson-android-armeabi-v7a.zip \
               tdjson-android-x86_64.zip \
               tdjson-ios.xcframework.zip \
+              tdjson-linux-arm64.zip \
               tdjson-linux-x64.zip \
               tdjson-macos-universal.zip \
+              tdjson-windows-arm64.zip \
               tdjson-windows-x64.zip \
               tdjson-manifest.json \
               SHA256SUMS; do
@@ -251,6 +253,12 @@ jobs:
             architecture: x64
             library: libtdjson.so
             asset: tdjson-linux-x64.zip
+          - platform: linux
+            label: Linux arm64
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            library: libtdjson.so
+            asset: tdjson-linux-arm64.zip
           - platform: macos
             label: macOS universal
             os: macos-15
@@ -263,6 +271,12 @@ jobs:
             architecture: x64
             library: tdjson.dll
             asset: tdjson-windows-x64.zip
+          - platform: windows
+            label: Windows arm64
+            os: windows-11-arm
+            architecture: arm64
+            library: tdjson.dll
+            asset: tdjson-windows-arm64.zip
     steps:
       - uses: actions/checkout@v7
 
@@ -279,10 +293,30 @@ jobs:
       - name: Install Windows native dependencies
         if: matrix.platform == 'windows'
         shell: pwsh
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
         run: |
+          # The Windows arm64 image ships no pre-bootstrapped vcpkg.
+          if (-not $env:VCPKG_INSTALLATION_ROOT -or
+              -not (Test-Path "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe")) {
+            $root = "$env:RUNNER_TEMP\vcpkg"
+            if (-not (Test-Path $root)) {
+              git clone --depth 1 https://github.com/microsoft/vcpkg.git $root
+            }
+            & "$root\bootstrap-vcpkg.bat" -disableMetrics
+            if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed" }
+            $env:VCPKG_INSTALLATION_ROOT = $root
+            "VCPKG_INSTALLATION_ROOT=$root" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          $triplet = $env:ARCHITECTURE
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install `
-            gperf:x64-windows openssl:x64-windows-static zlib:x64-windows-static
-          $gperfTools = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\gperf"
+            "gperf:$triplet-windows" `
+            "openssl:$triplet-windows-static" `
+            "zlib:$triplet-windows-static"
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed" }
+          $gperfTools =
+            "$env:VCPKG_INSTALLATION_ROOT\installed\$triplet-windows\tools\gperf"
           if (-not (Test-Path "$gperfTools\gperf.exe")) {
             throw "vcpkg did not install gperf.exe"
           }
@@ -291,7 +325,7 @@ jobs:
       - name: Cache desktop native build
         uses: actions/cache@v6
         with:
-          path: build/desktop-${{ matrix.platform }}
+          path: build/desktop-${{ matrix.platform }}-${{ matrix.architecture }}
           key: desktop-${{ matrix.platform }}-${{ matrix.architecture }}-${{ needs.prepare.outputs.upstream_short_sha }}-${{ needs.prepare.outputs.patchset_sha }}-${{ needs.prepare.outputs.build_definition_sha }}
 
       - name: Build patched desktop tdjson
@@ -299,7 +333,11 @@ jobs:
         env:
           TD_COMMIT: ${{ needs.prepare.outputs.upstream_sha }}
           TD_BUILD_JOBS: '2'
-        run: scripts/build-desktop-lib.sh "${{ matrix.platform }}" "dist/${{ matrix.library }}"
+        run: |
+          scripts/build-desktop-lib.sh \
+            "${{ matrix.platform }}" \
+            "dist/${{ matrix.library }}" \
+            "${{ matrix.architecture }}"
 
       - name: Verify Windows exports
         if: matrix.platform == 'windows'
@@ -339,7 +377,7 @@ jobs:
       - name: Upload desktop asset
         uses: actions/upload-artifact@v7
         with:
-          name: tdjson-${{ matrix.platform }}
+          name: tdjson-${{ matrix.platform }}-${{ matrix.architecture }}
           path: dist/${{ matrix.asset }}
           if-no-files-found: error
 
@@ -415,8 +453,10 @@ jobs:
               "tdjson-android-armeabi-v7a.zip",
               "tdjson-android-x86_64.zip",
               "tdjson-ios.xcframework.zip",
+              "tdjson-linux-arm64.zip",
               "tdjson-linux-x64.zip",
               "tdjson-macos-universal.zip",
+              "tdjson-windows-arm64.zip",
               "tdjson-windows-x64.zip",
           }
           if set(assets) != expected:
@@ -431,8 +471,10 @@ jobs:
               "tdjson-android-x86_64.zip": {
                   "x86_64/libtdjson.so",
               },
+              "tdjson-linux-arm64.zip": {"libtdjson.so"},
               "tdjson-linux-x64.zip": {"libtdjson.so"},
               "tdjson-macos-universal.zip": {"libtdjson.dylib"},
+              "tdjson-windows-arm64.zip": {"tdjson.dll"},
               "tdjson-windows-x64.zip": {"tdjson.dll"},
           }
           ios_prefixes = (
