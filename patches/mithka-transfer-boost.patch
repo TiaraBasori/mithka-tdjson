@@ -222,6 +222,24 @@ index e07e00d..e188dac 100644
  namespace {
  
  static TD_THREAD_LOCAL td::string *mithka_last_error;
+diff --git a/td/telegram/td_json_client.h b/td/telegram/td_json_client.h
+index b8b504f..177d0ac 100644
+--- a/td/telegram/td_json_client.h
++++ b/td/telegram/td_json_client.h
+@@ -116,6 +116,13 @@ TDJSON_EXPORT int td_mithka_import_session_string(const char *session_string, co
+  */
+ TDJSON_EXPORT const char *td_mithka_last_error();
+ 
++/**
++ * Configures Mithka's transfer chunk sizes and parallel request limits before creating a TDLib client.
++ * A zero chunk size or parallelism disables boost for that transfer direction.
++ */
++TDJSON_EXPORT void td_mithka_set_transfer_boost(int download_chunk_size, int download_parallelism,
++                                                int upload_chunk_size, int upload_parallelism);
++
+ /**
+  * A type of callback function that will be called when a message is added to the internal TDLib log.
+  *
 diff --git a/tdclientjson_export_list b/tdclientjson_export_list
 index 90f18f0..e98725f 100644
 --- a/tdclientjson_export_list
